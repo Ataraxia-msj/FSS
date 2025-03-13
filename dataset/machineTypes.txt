@@ -1,0 +1,7 @@
+machineTypeId	machineTypeName	
+1	DARES	
+2	WBRES	
+		
+		
+		
+		
