@@ -112,12 +112,12 @@ class DDPGAgent:
         for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
-# 主程序：训练和评估
+
 def main():
     env = SemiconductorEnv()
     state_dim = env.num_operation_types * 3  # 状态维度
     action_dim = 4  # 动作维度：setup_time, processing_time, left_operations, left_time
-    max_action = np.array([10.0, 10.0, 5.0, 50.0])  # 动作范围
+    max_action = np.array([70, 300, 20, 5000])  # 动作范围
 
     agent = DDPGAgent(state_dim, action_dim, max_action)
 
@@ -125,7 +125,7 @@ def main():
     max_steps = 500
 
     # 训练成功标准参数
-    target_reward = 50.0  # 设置目标奖励阈值，根据环境调整
+    target_reward = -30.0  # 设置目标奖励阈值，根据环境调整
     success_window = 10  # 连续几个episode达标才算成功
     history_rewards = []  # 记录历史奖励
     convergence_threshold = 5.0  # 收敛阈值
@@ -139,7 +139,8 @@ def main():
         for step in range(max_steps):
             action = agent.select_action(state)
             noise = np.random.normal(0, 0.1, size=action_dim)
-            action = np.clip(action + noise, -max_action, max_action)
+            action = np.clip(action + noise, 0, max_action)
+            # print(f"Action: {action}")
 
             next_state, reward, done, _ = env.step(action)
             agent.replay_buffer.add(state, action, reward, next_state, done)
@@ -173,54 +174,6 @@ def main():
                     print(f"训练收敛! 奖励稳定在{avg_recent_reward:.2f}")
                     break
 
-    # 绘制训练过程中的奖励曲线
-    plt.figure(figsize=(10, 5))
-    plt.plot(history_rewards)
-    plt.xlabel("Episode")
-    plt.ylabel("Training Reward")
-    plt.title("Training Reward Curve")
-    plt.savefig("training_rewards.png")
-
-    # 评估
-    total_rewards = []
-    for i in range(10):
-        state = env.reset()
-        episode_reward = 0
-        done = False
-        while not done:
-            action = agent.select_action(state)
-            next_state, reward, done, _ = env.step(action)
-            state = next_state
-            episode_reward += reward
-        total_rewards.append(episode_reward)
-    avg_reward = np.mean(total_rewards)
-    print(f"平均奖励（10次评估）: {avg_reward}")
     
-    # 最终判断训练是否成功
-    eval_success_threshold = target_reward * 0.8  # 评估阶段的成功阈值可以略低
-    if avg_reward >= eval_success_threshold:
-        training_success = True
-        print(f"评估成功! 平均奖励{avg_reward:.2f}超过评估阈值{eval_success_threshold}")
-    
-    print(f"训练{'成功' if training_success else '未成功'}")
-    
-    # 绘制评估奖励曲线
-    plt.figure(figsize=(10, 5))
-    plt.plot(total_rewards)
-    plt.xlabel("Episode")
-    plt.ylabel("Evaluation Reward")
-    plt.title("Evaluation Reward Curve")
-    plt.show()
-
-    # 保存模型
-    if training_success:
-        torch.save(agent.actor.state_dict(), "actor_success.pth")
-        torch.save(agent.critic.state_dict(), "critic_success.pth")
-    else:
-        torch.save(agent.actor.state_dict(), "actor.pth")
-        torch.save(agent.critic.state_dict(), "critic.pth")
-
-    
-
 if __name__ == "__main__":
     main()
