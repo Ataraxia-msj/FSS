@@ -68,14 +68,8 @@ def load_problem():
 
 # 操作类型ID与名称对应表
 def get_operation_type_name():
-    file_path = "dataset/operationTypes.xlsx"
-    df = pd.read_excel(file_path)
-
-    # 假设 ID 在第一列，名称在第二列（请根据实际列名调整）
-    id_column = df.columns[0]  # 第一列作为 ID
-    name_column = df.columns[1]  # 第二列作为名称
-    id_name_dict = dict(zip(df[id_column], df[name_column]))
-
+    df = pd.read_excel("dataset/operationTypes.xlsx")
+    id_name_dict = dict(zip(df[df.columns[0]], df[df.columns[1]]))
     return id_name_dict
 
 def get_setup_time(machine_type_id, is_job_type_same, is_operation_type_same):
@@ -107,9 +101,6 @@ def get_executable_operations(jobs):
 
 class SemiconductorEnv:
     def __init__(self):
-
-        
-        # 初始化需求
         # 加载数据
         self.job_types = load_jobtypes()
         self.operation_types = load_operationtypes()
@@ -119,37 +110,31 @@ class SemiconductorEnv:
         self.operation_type_name = get_operation_type_name()
         print('初始化需求成功，当前产品名称，及其需求量为：',self.problem_info[0]['ProductionRequirements'])
 
+        # 初始化操作类型列表，确保状态向量顺序一致
+        self.operation_types_list = list(self.operation_types.keys())
+        self.num_operation_types = len(self.operation_types_list)
 
         # 初始化机器状态
         self.init_machinestaus()
         print("初始化机器状态成功，当前机器状态为：", self.machine_status)
 
-        #获得所有job，和对应的operation
-        jobtypes = self.job_types   #{'A': [1, 2], 'B': [3, 4]}
-        # 每个job的需求量
-        problems = self.problem_info
-        jobrequirements = problems[0]['ProductionRequirements']  # [('A', 2), ('B', 1)]
-        # 获得每个operation的需求量,{A:{1:2, 2:2},B:{3:1, 4:1}}
+        # 初始化作业和操作需求
+        jobrequirements = self.problem_info[0]['ProductionRequirements']  # [('A', 2), ('B', 1)]
         operationrequirements = {}
         for job, num in jobrequirements:
-            for operation in jobtypes[job]:
+            for operation in self.job_types[job]:
                 if job not in operationrequirements:
                     operationrequirements[job] = {}
                 operationrequirements[job][operation] = num
-
-        # 获得当前可执行的operation
-        self.executable_operations = get_executable_operations(operationrequirements)
-
-        # 获得每个operation的需求量
         self.operationrequirements = operationrequirements
-
         self.jobrequirements = jobrequirements
 
-        
-        
-        
-        
-        
+        # 当前可执行的operation
+        self.executable_operations = get_executable_operations(operationrequirements)
+
+        # 时间戳和机器完成时间
+        self.timestamp = 0
+        self.machine_completion_times = {machine: 0 for machine in self.machine_status}
 
     # 初始化机器状态   
     def init_machinestaus(self):
@@ -166,6 +151,7 @@ class SemiconductorEnv:
         """
 
         # 向量一：等待操作的数量
+        waiting_ops = np.zeros(self.num_operation_types)
         executable_operations = self.executable_operations
         # 把operation展开成一个列表，如果operation在可执行的operation中，就是需求量，否则是0
         state1 = []
@@ -249,6 +235,7 @@ class SemiconductorEnv:
         （设置时间，加工时间，剩余操作的数量，剩余操作所需要的处理时间）
 
         """
+        # 记录总时间
 
         # 获得可能执行的动作
         action_machine_pair = []
@@ -279,32 +266,79 @@ class SemiconductorEnv:
             return setup_time
 
         for operation in executable_operations:
-            # 遍历所有机器
+            # 遍历所有空闲的机器
             for machine in self.machine_status:
+                # 判断机器是否空闲
+                if not self.machine_status[machine]['working']:
 
-                setup_time_value = setting_time(operation, machine)
-                progress_time = self.operation_types[operation]['processingTime']
+                    setup_time_value = setting_time(operation, machine)
+                    progress_time = self.operation_types[operation]['processingTime']
 
-                # 剩余操作数量
-                job_type = next(job for job, ops in self.operationrequirements.items() if operation in ops)
-                total_operations = len(self.job_types[job_type])
-                current_operation_index = self.job_types[job_type].index(operation)
-                left_operations = total_operations - current_operation_index - 1
+                    # 剩余操作数量
+                    job_type = next(job for job, ops in self.operationrequirements.items() if operation in ops)
+                    total_operations = len(self.job_types[job_type])
+                    current_operation_index = self.job_types[job_type].index(operation)
+                    left_operations = total_operations - current_operation_index - 1
 
-                # 剩余操作所需要的总时间
-                left_time = 0
-                for i in range(current_operation_index + 1, total_operations):
-                    left_time += self.operation_types[self.job_types[job_type][i]]['processingTime']
-                
-                action_machine_pair.append((setup_time_value, progress_time, left_operations, left_time))
+                    # 剩余操作所需要的总时间
+                    left_time = 0
+                    for i in range(current_operation_index + 1, total_operations):
+                        left_time += self.operation_types[self.job_types[job_type][i]]['processingTime']
+                    
+                    action_machine_pair.append((setup_time_value, progress_time, left_operations, left_time))
+        print("可能执行的动作为：", action_machine_pair)
 
-    # 计算原始动作与可能执行动作之间的欧几里德距离
+        # 计算原始动作与可能执行动作之间的欧几里德距离
         def distance(action1, action2):
             return sum((a1 - a2) ** 2 for a1, a2 in zip(action1, action2)) ** 0.5
         
         # 选择距离最近的作为action
         action = min(action_machine_pair, key=lambda x: distance(action, x))
         print("选择的动作为：", action)
+
+        # 执行动作，更新系统状态
+        # 判断执行的是哪个operation
+        def operation_to_execute(action):
+            progress_time = action[1]
+            left_operations = action[2]
+            left_time = action[3]
+            # 循环所有的operation找到对应的operation
+            for operation in self.executable_operations:
+                # 首先progerss时间要相同
+                if progress_time == self.operation_types[operation]['processingTime']:
+                    # 剩余操作数量要相同
+                    job_type = next(job for job, ops in self.operationrequirements.items() if operation in ops)
+                    total_operations = len(self.job_types[job_type])
+                    current_operation_index = self.job_types[job_type].index(operation)
+                    if left_operations == total_operations - current_operation_index - 1:
+                        # 剩余操作所需要的总时间要相同
+                        left_time_ = 0
+                        for i in range(current_operation_index + 1, total_operations):
+                            left_time_ += self.operation_types[self.job_types[job_type][i]]['processingTime']
+                        if left_time == left_time_:
+                            return operation
+            return operation
+        def machine_to_execute(action):
+            setup_time = action[0]
+            for machine in self.machine_status:
+                if setup_time == setting_time(operation_to_execute(action), machine):
+                    return machine
+            return machine
+        # 执行操作
+        operation = operation_to_execute(action)
+        machine = machine_to_execute(action)
+        # 更新机器状态
+        self.machine_status[machine]['working'] = True
+        # 更新操作状态
+        job_type = next(job for job, ops in self.operationrequirements.items() if operation in ops)
+        self.operationrequirements[job_type][operation] -= 1
+        # 更新可执行操作
+        self.executable_operations = get_executable_operations(self.operationrequirements)
+        print("执行动作后的机器状态：", self.machine_status)
+        print("执行动作后的操作状态：", self.operationrequirements)
+        print("执行动作后的可执行操作：", self.executable_operations)
+        
+
         
 
     def calculate_reward(self):        
@@ -335,3 +369,5 @@ if __name__ == "__main__":
     semenv = SemiconductorEnv()
     yuanaction = [6,1,1,1]
     semenv.execute_action(yuanaction)
+    yuanaction1 = [6,1,1,1]
+    semenv.execute_action(yuanaction1)
