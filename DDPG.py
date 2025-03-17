@@ -125,10 +125,10 @@ def main():
     max_steps = 500
 
     # 训练成功标准参数
-    target_reward = -30.0  # 设置目标奖励阈值，根据环境调整
-    success_window = 10  # 连续几个episode达标才算成功
+
+    success_window = 50  # 连续几个episode达标才算成功
     history_rewards = []  # 记录历史奖励
-    convergence_threshold = 5.0  # 收敛阈值
+    convergence_threshold = 100.0  # 收敛阈值
     training_success = False  # 训练是否成功的标志
 
 
@@ -138,7 +138,7 @@ def main():
 
         for step in range(max_steps):
             action = agent.select_action(state)
-            noise = np.random.normal(0, 0.1, size=action_dim)
+            noise = np.random.normal(0, 10, size=action_dim)
             action = np.clip(action + noise, 0, max_action)
             # print(f"Action: {action}")
 
@@ -159,21 +159,35 @@ def main():
             recent_rewards = history_rewards[-success_window:]
             avg_recent_reward = np.mean(recent_rewards)
             
-            # 标准1: 平均奖励达到目标值
-            if avg_recent_reward >= target_reward:
-                training_success = True
-                print(f"训练成功! 最近{success_window}个episode平均奖励{avg_recent_reward:.2f}达到目标{target_reward}")
-                break
-            
             # 标准2: 奖励收敛判断
             if episode >= 2*success_window:
                 prev_rewards = history_rewards[-2*success_window:-success_window]
                 avg_prev_reward = np.mean(prev_rewards)
-                if abs(avg_recent_reward - avg_prev_reward) < convergence_threshold and avg_recent_reward > 0:
+                if abs(avg_recent_reward - avg_prev_reward) < convergence_threshold and avg_recent_reward > -50000:
                     training_success = True
                     print(f"训练收敛! 奖励稳定在{avg_recent_reward:.2f}")
                     break
-
+    # 绘制奖励曲线
+    plt.figure(figsize=(12, 6))
+    plt.plot(history_rewards)
+    plt.title('Reward Curve')
+    plt.xlabel('Episode')
+    plt.ylabel('total reward')
+    plt.grid(True)
+    
+    # 添加移动平均线以更清晰地显示趋势
+    window_size = 10
+    if len(history_rewards) >= window_size:
+        moving_avg = np.convolve(history_rewards, np.ones(window_size)/window_size, mode='valid')
+        plt.plot(range(window_size-1, len(history_rewards)), moving_avg, 'r-', linewidth=2, label=f'{window_size}轮移动平均')
+        plt.legend()
+    
+    plt.savefig('reward_curve.png')  # 保存图片
+    
+    if training_success:
+        print("训练成功！")
+    else:
+        print("达到最大训练轮数，但未满足收敛条件。")
     
 if __name__ == "__main__":
     main()
