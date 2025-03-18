@@ -386,19 +386,19 @@ class SemiconductorEnv:
         return new_state, reward, done, {}
 
 
-# env = SemiconductorEnv()
-# env.reset()
+env = SemiconductorEnv()
+env.reset()
 
-# print("初始状态：",env.state())
-# print('当前机器的状态：',env.machine_status)
-# state, reward, done, _ = env.execute_action((0,2,1,3))
+print("初始状态：",env.state())
+print('当前机器的状态：',env.machine_status)
+state, reward, done, _ = env.execute_action((0.0, 1.589230423814995, 0.0, 2.0))
 
-# print("第一次操作后状态：",state)
-# print('当前机器的状态：',env.machine_status)
-# print("第一次操作的奖励：",reward)
-# print("是否结束：",done)
-# print("当前可执行的操作：",env.executable_operations)
-# print("动作机器对：",env.get_available_actions())
+print("第一次操作后状态：",state)
+print('当前机器的状态：',env.machine_status)
+print("第一次操作的奖励：",reward)
+print("是否结束：",done)
+print("当前可执行的操作：",env.executable_operations)
+print("动作机器对：",env.get_available_actions())
 # state, reward, done, _ = env.execute_action((0,2,1,3))
 
 # print("第二次操作的状态：",state)
