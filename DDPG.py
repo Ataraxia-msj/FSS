@@ -117,7 +117,8 @@ def main():
     env = SemiconductorEnv()
     state_dim = env.num_operation_types * 3  # 状态维度
     action_dim = 4  # 动作维度：setup_time, processing_time, left_operations, left_time
-    max_action = np.array([70, 300, 20, 5000])  # 动作范围
+    # max_action = np.array([70, 300, 20, 5000])  # 动作范围
+    max_action = np.array([6,3, 1, 2])  # 动作范围
 
     agent = DDPGAgent(state_dim, action_dim, max_action)
 
@@ -126,7 +127,7 @@ def main():
 
     # 训练成功标准参数
 
-    success_window = 50  # 连续几个episode达标才算成功
+    success_window = 200  # 连续几个episode达标才算成功
     history_rewards = []  # 记录历史奖励
     convergence_threshold = 100.0  # 收敛阈值
     training_success = False  # 训练是否成功的标志
@@ -138,11 +139,12 @@ def main():
 
         for step in range(max_steps):
             action = agent.select_action(state)
-            noise = np.random.normal(0, 10, size=action_dim)
+            noise = np.random.normal(0, 1, size=action_dim)
             action = np.clip(action + noise, 0, max_action)
             # print(f"Action: {action}")
-
-            next_state, reward, done, _ = env.step(action)
+            # print(f"Action: {tuple(action)}")
+            print(f"Action: {tuple(float(a) for a in action)}")
+            next_state, reward, done, _ = env.execute_action(tuple(float(a) for a in action))
             agent.replay_buffer.add(state, action, reward, next_state, done)
 
             state = next_state
@@ -170,9 +172,9 @@ def main():
     # 绘制奖励曲线
     plt.figure(figsize=(12, 6))
     plt.plot(history_rewards)
-    plt.title('Reward Curve')
+    plt.title('RewardCurve')
     plt.xlabel('Episode')
-    plt.ylabel('total reward')
+    plt.ylabel('totalreward')
     plt.grid(True)
     
     # 添加移动平均线以更清晰地显示趋势
@@ -182,7 +184,7 @@ def main():
         plt.plot(range(window_size-1, len(history_rewards)), moving_avg, 'r-', linewidth=2, label=f'{window_size}轮移动平均')
         plt.legend()
     
-    plt.savefig('reward_curve.png')  # 保存图片
+    plt.savefig('rewardcurve.png')  # 保存图片
     
     if training_success:
         print("训练成功！")

@@ -81,7 +81,7 @@ def get_setup_time(machine_type_id, is_job_type_same, is_operation_type_same):
     (1, True,  False): 3,
     (1, False, True):  6,
     (1, False, False): 6,
-    (2, True,  True):  6.1,
+    (2, True,  True):  0,
     (2, True,  False): 6.2,
     (2, False, True):  6.3,
     (2, False, False): 6.4,
@@ -218,7 +218,7 @@ class SemiconductorEnv:
         # 生成候选动作
         action_machine_pairs = []
         executable_ops = self.executable_operations # 当前可执行的操作
-        print("当前可执行的操作：",executable_ops)
+        # print("当前可执行的操作：",executable_ops)
         for op in executable_ops: # 遍历可执行操作
             job = next(job for job, ops in self.operationrequirements.items() if op in ops) # 获取操作所属的作业
             for machine, status in self.machine_status.items(): # 遍历机器
@@ -284,7 +284,7 @@ class SemiconductorEnv:
         # 输出当前环境的一些信息
         # 若没有候选动作，则说明当前时间无法执行任何动作，直接跳转到下一个事件时间
         if not action_machine_pairs:
-            print("当前时间无法执行任何动作，直接跳转到下一个事件时间")
+            # print("当前时间无法执行任何动作，直接跳转到下一个事件时间")
             # 推进到下一个事件（所有机器中最早的完成时间）
             next_times = [t for t in self.machine_completion_times.values() if t > self.timestamp]
             next_time = min(next_times) if next_times else float('inf')
@@ -304,7 +304,7 @@ class SemiconductorEnv:
 
             # 更新时间戳到下一个事件时刻
             self.timestamp = next_time
-            print("下一个事件时间：",self.timestamp)
+            # print("下一个事件时间：",self.timestamp)
 
             # 更新机器状态：若在当前时间戳机器已完成作业，则标记为空闲
             if self.timestamp < float('inf'):
@@ -332,6 +332,8 @@ class SemiconductorEnv:
         self.machine_status[selected_machine]['working'] = True
         self.machine_status[selected_machine]['current_operation'] = selected_op
         self.machine_completion_times[selected_machine] = completion_time
+        # 把机器的seting改为当前操作，需要从id对应到名称
+        self.machine_status[selected_machine]['setting'] = self.operation_type_name[selected_op]
 
         # 确定下一个时间戳 τ(s_{t+1})
         available_actions = self.get_available_actions()
@@ -370,7 +372,7 @@ class SemiconductorEnv:
         
         # 更新时间戳到 τ(s_{t+1})
         self.timestamp = next_time
-        print("时间：",self.timestamp)
+        # print("时间：",self.timestamp)
 
         # 更新所有机器状态：若在当前时间戳机器完成作业，则标记为空闲
         if self.timestamp < float('inf'):
@@ -384,41 +386,58 @@ class SemiconductorEnv:
         return new_state, reward, done, {}
 
 
-env = SemiconductorEnv()
-env.reset()
+# env = SemiconductorEnv()
+# env.reset()
 
-print("初始状态：",env.state())
-state, reward, done, _ = env.execute_action((0,2,1,3))
+# print("初始状态：",env.state())
+# print('当前机器的状态：',env.machine_status)
+# state, reward, done, _ = env.execute_action((0,2,1,3))
 
-print("第一次操作后状态：",state)
-print("第一次操作的奖励：",reward)
-print("是否结束：",done)
-state, reward, done, _ = env.execute_action((0,2,1,3))
+# print("第一次操作后状态：",state)
+# print('当前机器的状态：',env.machine_status)
+# print("第一次操作的奖励：",reward)
+# print("是否结束：",done)
+# print("当前可执行的操作：",env.executable_operations)
+# print("动作机器对：",env.get_available_actions())
+# state, reward, done, _ = env.execute_action((0,2,1,3))
 
-print("第二次操作的状态：",state)
-print("第二次操作的奖励：",reward)
-print("是否结束：",done)
+# print("第二次操作的状态：",state)
+# print('当前机器的状态：',env.machine_status)
+# print("第二次操作的奖励：",reward)
+# print("是否结束：",done)
 
-state, reward, done, _ = env.execute_action((6.3,3,0,0))
+# state, reward, done, _ = env.execute_action((6.3,3,0,0))
 
-print("第三次操作的状态：",state)
-print("第三次操作的奖励：",reward)
-print("是否结束：",done)
+# print("第三次操作的状态：",state)
+# print('当前机器的状态：',env.machine_status)
+# print("第三次操作的奖励：",reward)
+# print("是否结束：",done)
 
-state, reward, done, _ = env.execute_action((6,1,1,4))
+# state, reward, done, _ = env.execute_action((6,1,1,4))
 
-print("第四次操作的状态：",state)
-print("第四次操作的奖励：",reward)
-print("是否结束：",done)
+# print("第四次操作的状态：",state)
+# print('当前机器的状态：',env.machine_status)
+# print("第四次操作的奖励：",reward)
+# print("是否结束：",done)
 
-state, reward, done, _ = env.execute_action((0,3,0,0))
+# state, reward, done, _ = env.execute_action((0,3,0,0))
 
-print("第五次操作的状态：",state)
-print("第五次操作的奖励：",reward)
-print("是否结束：",done)
+# print("第五次操作的状态：",state)
+# print('当前机器的状态：',env.machine_status)
+# print("第五次操作的奖励：",reward)
+# print("是否结束：",done)
 
-state, reward, done, _ = env.execute_action((0,3,0,0))
+# state, reward, done, _ = env.execute_action((0,3,0,0))
 
-print("第六次操作的状态：",state)
-print("第六次操作的奖励：",reward)
-print("是否结束：",done)
+# print("第六次操作的状态：",state)
+# print('当前机器的状态：',env.machine_status)
+# print("第六次操作的奖励：",reward)
+# print("是否结束：",done)
+
+# state, reward, done, _ = env.execute_action((0,3,0,0))
+
+# print("第七次操作的状态：",state)
+# print('当前机器的状态：',env.machine_status)
+# print("第七次操作的奖励：",reward)
+# print("是否结束：",done)
+
