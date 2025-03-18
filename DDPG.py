@@ -132,7 +132,6 @@ def main():
     convergence_threshold = 100.0  # 收敛阈值
     training_success = False  # 训练是否成功的标志
 
-
     for episode in range(num_episodes):
         state = env.reset()
         episode_reward = 0
@@ -143,7 +142,7 @@ def main():
             action = np.clip(action + noise, 0, max_action)
             # print(f"Action: {action}")
             # print(f"Action: {tuple(action)}")
-            print(f"Action: {tuple(float(a) for a in action)}")
+            # print(f"Action: {tuple(float(a) for a in action)}")
             next_state, reward, done, _ = env.execute_action(tuple(float(a) for a in action))
             agent.replay_buffer.add(state, action, reward, next_state, done)
 

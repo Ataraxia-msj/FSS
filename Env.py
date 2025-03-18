@@ -4,7 +4,7 @@ import pandas as pd
 # 处理jobtypes.xlsx文件
 def load_jobtypes(): 
     # 加载 jobTypes.xlsx 文件
-    df_jobtypes = pd.read_excel("dataset/example_jobtypes.xlsx")
+    df_jobtypes = pd.read_excel("dataset\\example_jobtypes.xlsx")
     # df_jobtypes = pd.read_excel("dataset/jobTypes.xlsx")
     # 解析 operationTypeSequence 字段，将字符串转换为整数列表
     df_jobtypes["operationTypeSequence"] = df_jobtypes["operationTypeSequence"].apply(lambda x: list(map(int, str(x).split(','))))
@@ -15,7 +15,7 @@ def load_jobtypes():
 def load_operationtypes():
     # 加载operationTypes.xlsx 文件
     # df_operationtypes = pd.read_excel("dataset/operationTypes.xlsx")
-    df_operationtypes = pd.read_excel("dataset/example_operationtypes.xlsx")
+    df_operationtypes = pd.read_excel("dataset\\example_operationtypes.xlsx")
     # 转换为字典：key = operationTypeId, value = (operationTypeName, machineTypeId, processingTime)
     operation_types = df_operationtypes.set_index("operationTypeId")[["operationTypeName", "machineTypeId", "processingTime"]].to_dict(orient="index")
     return operation_types
@@ -24,7 +24,7 @@ def load_operationtypes():
 def load_problem():
     # 加载problem.xlsx文件
     # df_problem = pd.read_excel("dataset/problem.xlsx")
-    df_problem = pd.read_excel("dataset/example_problem.xlsx")
+    df_problem = pd.read_excel("dataset\\example_problem.xlsx")
     def parse_production_requirements(req_str):
         """
         将形如 "A_2,B_1" 的字符串解析成列表 [('A', 2), ('B', 1)]。
@@ -71,7 +71,7 @@ def load_problem():
 
 # 操作类型ID与名称对应表
 def get_operation_type_name():
-    df = pd.read_excel("dataset/operationTypes.xlsx")
+    df = pd.read_excel("dataset\\operationTypes.xlsx")
     id_name_dict = dict(zip(df[df.columns[0]], df[df.columns[1]]))
     return id_name_dict
 
@@ -259,7 +259,7 @@ class SemiconductorEnv:
     
     def reset(self):
         """重置环境"""
-        self.operation_log = []  # 初始化操作日志
+
         self.init_machinestaus()
         jobrequirements = self.problem_info[0]['ProductionRequirements']
         operationrequirements = {}
@@ -270,9 +270,13 @@ class SemiconductorEnv:
                 operationrequirements[job][operation] = num
         self.operationrequirements = operationrequirements
         self.jobrequirements = jobrequirements
+        self.executed_operations = {outer_key: {inner_key: 0 for inner_key in operationrequirements[outer_key]} for outer_key in operationrequirements}
         self.executable_operations = get_executable_operations(self.operationrequirements,self.executed_operations)
         self.timestamp = 0
         self.machine_completion_times = {machine: 0 for machine in self.machine_status}
+        
+        self.calculate_waiting_ops = waiting_ops(self.operationrequirements)
+
         return self.state()
 
     def execute_action(self, action):
@@ -343,7 +347,7 @@ class SemiconductorEnv:
         self.executed_operations[job][selected_op] += 1
         self.executable_operations = get_executable_operations(self.operationrequirements,self.executed_operations)
         
-        # 更新等待操作数量：当前操作的数量减 1，下一个操作的数量加 1
+        # 更新等待操作数量：当前操作的数量减 1，如果有下一个操作，则下一个操作数量加 1
         current_idx = self.job_types[job].index(selected_op)
         total_ops = len(self.job_types[job])
         if current_idx < total_ops - 1:
@@ -369,6 +373,8 @@ class SemiconductorEnv:
                     idle_time_sum += next_time - comp_time
                 # 如果 comp_time > next_time，机器始终处于工作状态，空闲时间为 0
         reward = -(setup_time + idle_time_sum)
+        print("setup_time:",setup_time)
+        print("idle_time_sum:",idle_time_sum)
         
         # 更新时间戳到 τ(s_{t+1})
         self.timestamp = next_time
@@ -386,20 +392,24 @@ class SemiconductorEnv:
         return new_state, reward, done, {}
 
 
-env = SemiconductorEnv()
-env.reset()
+# env = SemiconductorEnv()
+# env.reset()
 
-print("初始状态：",env.state())
-print('当前机器的状态：',env.machine_status)
-state, reward, done, _ = env.execute_action((0.0, 1.589230423814995, 0.0, 2.0))
+# total_reward = 0
 
-print("第一次操作后状态：",state)
-print('当前机器的状态：',env.machine_status)
-print("第一次操作的奖励：",reward)
-print("是否结束：",done)
-print("当前可执行的操作：",env.executable_operations)
-print("动作机器对：",env.get_available_actions())
+# print("初始状态：",env.state())
+# print('当前机器的状态：',env.machine_status)
 # state, reward, done, _ = env.execute_action((0,2,1,3))
+# total_reward += reward
+
+# print("第一次操作后状态：",state)
+# print('当前机器的状态：',env.machine_status)
+# print("第一次操作的奖励：",reward)
+# print("是否结束：",done)
+# print("当前可执行的操作：",env.executable_operations)
+# print("动作机器对：",env.get_available_actions())
+# state, reward, done, _ = env.execute_action((0,2,1,3))
+# total_reward += reward
 
 # print("第二次操作的状态：",state)
 # print('当前机器的状态：',env.machine_status)
@@ -407,6 +417,7 @@ print("动作机器对：",env.get_available_actions())
 # print("是否结束：",done)
 
 # state, reward, done, _ = env.execute_action((6.3,3,0,0))
+# total_reward += reward
 
 # print("第三次操作的状态：",state)
 # print('当前机器的状态：',env.machine_status)
@@ -414,6 +425,7 @@ print("动作机器对：",env.get_available_actions())
 # print("是否结束：",done)
 
 # state, reward, done, _ = env.execute_action((6,1,1,4))
+# total_reward += reward
 
 # print("第四次操作的状态：",state)
 # print('当前机器的状态：',env.machine_status)
@@ -421,6 +433,7 @@ print("动作机器对：",env.get_available_actions())
 # print("是否结束：",done)
 
 # state, reward, done, _ = env.execute_action((0,3,0,0))
+# total_reward += reward
 
 # print("第五次操作的状态：",state)
 # print('当前机器的状态：',env.machine_status)
@@ -428,16 +441,20 @@ print("动作机器对：",env.get_available_actions())
 # print("是否结束：",done)
 
 # state, reward, done, _ = env.execute_action((0,3,0,0))
+# total_reward += reward
 
 # print("第六次操作的状态：",state)
 # print('当前机器的状态：',env.machine_status)
 # print("第六次操作的奖励：",reward)
 # print("是否结束：",done)
 
-# state, reward, done, _ = env.execute_action((0,3,0,0))
+# state, reward, done, _ = env.execute_action((6.3,4,0,0))
+# total_reward += reward
 
 # print("第七次操作的状态：",state)
 # print('当前机器的状态：',env.machine_status)
 # print("第七次操作的奖励：",reward)
 # print("是否结束：",done)
 
+# # 总奖励
+# print("总奖励：",total_reward)
