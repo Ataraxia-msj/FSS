@@ -166,6 +166,8 @@ class SemiconductorEnv:
         # 时间戳和机器完成时间
         self.timestamp = 0
         self.machine_completion_times = {machine: 0 for machine in self.machine_status}
+        # 添加一个虚拟的指针，判断是否有可以进行的操作
+        self.fake_pointer = 0
 
     # 初始化机器状态   
     def init_machinestaus(self):
@@ -218,7 +220,8 @@ class SemiconductorEnv:
         # 生成候选动作
         action_machine_pairs = []
         executable_ops = self.executable_operations # 当前可执行的操作
-        # print("当前可执行的操作：",executable_ops)
+
+        print("当前可执行的操作：",executable_ops)
         for op in executable_ops: # 遍历可执行操作
             job = next(job for job, ops in self.operationrequirements.items() if op in ops) # 获取操作所属的作业
             for machine, status in self.machine_status.items(): # 遍历机器
@@ -280,7 +283,8 @@ class SemiconductorEnv:
         return self.state()
 
     def execute_action(self, action):
-        """执行一步，返回新的状态、奖励和是否结束"""
+        """执行一步，返回新的状态、奖励和是否结束
+        """
         # 记录当前时间戳 τ(s_t)
         prev_time = self.timestamp
         action_machine_pairs = self.get_available_actions()
@@ -341,6 +345,7 @@ class SemiconductorEnv:
 
         # 确定下一个时间戳 τ(s_{t+1})
         available_actions = self.get_available_actions()
+        print("下一个可执行的动作：",available_actions)
 
         # 更新操作需求：减少对应作业中该操作的剩余需求
         self.operationrequirements[job][selected_op] -= 1
@@ -392,25 +397,17 @@ class SemiconductorEnv:
         return new_state, reward, done, {}
 
 
-# env = SemiconductorEnv()
-# env.reset()
+env = SemiconductorEnv()
+env.reset()
 
-# total_reward = 0
+total_reward = 0
 
-# print("初始状态：",env.state())
-# print('当前机器的状态：',env.machine_status)
-# state, reward, done, _ = env.execute_action((0,2,1,3))
-# total_reward += reward
+print("初始状态：",env.state())
+print('当前机器的状态：',env.machine_status)
+state, reward, done, _ = env.execute_action((0,2,1,3))
+total_reward += reward
 
-# print("第一次操作后状态：",state)
-# print('当前机器的状态：',env.machine_status)
-# print("第一次操作的奖励：",reward)
-# print("是否结束：",done)
-# print("当前可执行的操作：",env.executable_operations)
-# print("动作机器对：",env.get_available_actions())
-# state, reward, done, _ = env.execute_action((0,2,1,3))
-# total_reward += reward
-
+ 
 # print("第二次操作的状态：",state)
 # print('当前机器的状态：',env.machine_status)
 # print("第二次操作的奖励：",reward)
