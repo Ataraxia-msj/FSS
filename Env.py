@@ -280,7 +280,8 @@ class SemiconductorEnv:
         return self.state()
 
     def execute_action(self, action):
-        """执行一步，返回新的状态、奖励和是否结束"""
+        """执行一步，返回新的状态、奖励和是否结束
+        """
         # 记录当前时间戳 τ(s_t)
         prev_time = self.timestamp
         action_machine_pairs = self.get_available_actions()
