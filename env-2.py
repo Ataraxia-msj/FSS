@@ -1,12 +1,17 @@
 import numpy as np
 import pandas as pd
 
+##############################################################################
+# 数据集文件路径
 
 job_file = "dataset\\example_jobtypes.xlsx"
 machine_file = "dataset\\machineTypes.xlsx"
 operation_file = "dataset\\example_operationtypes.xlsx"
 problem_file = "dataset\\example_problem.xlsx"
 setup_file = "dataset\\example_setuptime.xlsx"
+
+
+##############################################################################
 
 # 创建机器类
 class Machine:
@@ -16,9 +21,12 @@ class Machine:
         :param typeid: 机器类型ID
         :param type: 机器类型
         :param name: 机器名称
-        :param setting: 机器初始设置
+        :param setting: 机器设置
         :param working: 是否工作
         :param current_operation: 当前操作
+        :param setup_time: 设置时间
+        :param progress_time: 加工时间
+        :param wait_time: 等待时间
         :param completion_time: 完成时间
         """
         self.id = id
@@ -27,7 +35,10 @@ class Machine:
         self.setting = setting
         self.working = False
         self.current_operation = None
-        self.completion_time = 0
+        self.setup_time = 0
+        self.progress_time = 0
+        self.wait_time = 0
+        self.completion_time = self.setup_time + self.progress_time + self.wait_time
     
     def is_idle(self, current_time):
         """
@@ -69,12 +80,14 @@ class Job:
         :param operation_sequence: 操作序列（列表）
         :param demand: 作业需求量
         :param completed_operations: 已完成操作
+        :param used_operations: 已使用的操作
         """
         self.job_id = job_id
         self.job_name = job_name
         self.operation_sequence = operation_sequence
         self.demand = demand
         self.completed_operations = {op: 0 for op in operation_sequence}
+        self.used_operations = {op: 0 for op in operation_sequence}  # 新增：跟踪已使用的操作数量
 
     def is_completed(self):
         """
@@ -141,6 +154,21 @@ class SemiconductorEnv:
         self.operations = operations
         self.timestamp = 0
 
+    def step(self, action):
+        """
+        执行一个动作
+        :param action: 动作
+        :return: 状态、奖励、是否完成、信息
+        """
+        # 检查机器是否空闲
+        for machine in self.machines:
+            if machine.working:
+                pass
+                # 机器在工作，目前不能进行任何操作
+            else:
+                pass
+                # 机器空闲，可以开始操作
+
     def reset(self):
         """
         重置环境
@@ -153,6 +181,8 @@ class SemiconductorEnv:
             machine.current_operation = None
             machine.completion_time = 0
 
+##############################################################################
+# 函数
 
 def load_machines(machine_file, problem_file):
     machine_types_df = pd.read_excel(machine_file)
@@ -206,8 +236,6 @@ def load_operations(operation_file):
         ))
     return operations
 
-
-
 def create_operation_instances(operations, jobs):
     """
     根据作业需求量创建实际的操作实例
@@ -242,29 +270,104 @@ def create_operation_instances(operations, jobs):
     
     return operation_instances
 
-# 加载数据
-# 加载基础数据
-print("加载机器数据...")
-machines = load_machines(machine_file, problem_file)
-print(f"成功加载 {len(machines)} 台机器:")
-for machine in machines:
-    print(f"  ID: {machine.id}, 类型: {machine.type}, 名称: {machine.name}, 设置: {machine.setting}, 空闲: {machine.is_idle(0)}, 完成时间: {machine.completion_time}, 当前操作: {machine.current_operation}")
+def get_setup_time(machine_type_id, is_job_type_same, is_operation_type_same):
+    """
+    获取设置时间
+    :param machine_type_id: 机器类型ID
+    :param is_job_type_same: 是否相同作业类型
+    :param is_operation_type_same: 是否相同操作类型
+    :return: 设置时间
+    """
+    setup_time_lookup = {
+        (1, True,  True):  0,
+        (1, True,  False): 3,
+        (1, False, True):  6,
+        (1, False, False): 6,
+        (2, True,  True):  0,
+        (2, True,  False): 6.2,
+        (2, False, True):  6.3,
+        (2, False, False): 6.4,
+    }
+    return setup_time_lookup[(machine_type_id, is_job_type_same, is_operation_type_same)]
 
-print("\n加载作业数据...")
-jobs = load_jobs(job_file, problem_file)
-print(f"成功加载 {len(jobs)} 个作业:")
-for job in jobs:
-    print(f"  ID: {job.job_id}, 名称: {job.job_name}, 操作序列: {job.operation_sequence}, 需求量: {job.demand}")
+# 切换时间戳
+def transfrom_time(now_time, machines):
+    """
+    切换时间戳到下一个机器完成操作的时间点
+    
+    :param now_time: 当前时间戳
+    :param machines: 机器列表
+    :return: 新的时间戳
+    """ 
+    # 找到下一个即将完成操作的机器
+    next_completion_time = float('inf')
+    completing_machines = []
 
-print("\n加载操作类型数据...")
-operation_types = load_operations(operation_file)
-print(f"成功加载 {len(operation_types)} 个操作类型:")
-for operation in operation_types:
-    print(f"  ID: {operation.operation_id}, 名称: {operation.operation_name}, 机器类型: {operation.machine_type}, 处理时间: {operation.processing_time}")
+    for machine in machines:
+        if machine.working and machine.setup_time > now_time:
+            if machine.completion_time < next_completion_time:
+                next_completion_time = machine.completion_time
+                completing_machines = [machine]
+            elif machine.completion_time == next_completion_time:
+                completing_machines.append(machine)
+    
+    # 如果没有正在工作的机器，返回当前时间
+    if next_completion_time == float('inf'):
+        return now_time
+    
+    # 更新所有在该时间点完成操作的机器状态
+    for machine in completing_machines:
+        machine.finish_operation(next_completion_time)
+        
+    # 更新时间到下一个完成时间
+    return next_completion_time
 
-# 创建操作实例
-print("\n创建操作实例...")
-operations = create_operation_instances(operation_types, jobs)
-print(f"成功创建 {len(operations)} 个操作实例:")
-for operation in operations:
-    print(f"  ID: {operation.operation_id}, 名称: {operation.operation_name}, 类型ID: {operation.operation_type_id}, 作业ID: {operation.job_id}, 机器类型: {operation.machine_type}, 处理时间: {operation.processing_time}")
+# 调度操作，还没有写完
+def schedule_operation(operation, machine, current_time, jobs):
+    """
+    安排一个操作到机器上
+    
+    :param operation: 要安排的操作
+    :param machine: 要使用的机器
+    :param current_time: 当前时间戳
+    :param jobs: 作业列表
+    :return: 操作的完成时间
+    """
+    # 找到操作所属的作业
+    job = next((j for j in jobs if j.job_id == operation.job_id), None)
+    if not job:
+        return current_time
+        
+    # 获取操作在作业序列中的位置
+    op_sequence = job.operation_sequence
+    op_index = op_sequence.index(operation.operation_type_id)
+    
+    # 计算设置时间
+    prev_op = machine.current_operation
+    is_job_type_same = prev_op and prev_op.job_id == operation.job_id
+    is_operation_type_same = prev_op and prev_op.operation_type_id == operation.operation_type_id
+    setup_time = get_setup_time(machine.type, is_job_type_same, is_operation_type_same)
+    
+    # 检查前置操作是否完成
+    waiting_time = 0
+    if op_index > 0:
+        prev_op_type_id = op_sequence[op_index - 1]
+        # 检查是否有已完成但尚未被后续操作使用的前置操作实例
+        # 需要跟踪已完成但尚未被后续操作使用的前置操作数量
+        available_prev_ops = job.completed_operations[prev_op_type_id] - job.used_operations.get(prev_op_type_id, 0)
+
+        if available_prev_ops <= 0:
+            # 没有可用的前置操作实例，需要等待
+            # waiting_time = estimate_waiting_time(prev_op_type_id, machines, jobs)
+            pass
+        else:
+            # 有可用的前置操作实例，可以立即开始
+            # 更新已使用的前置操作数量
+            job.used_operations[prev_op_type_id] = job.used_operations.get(prev_op_type_id, 0) + 1
+    
+    # 开始操作
+    machine.start_operation(operation, setup_time, operation.processing_time, current_time, waiting_time)
+    return machine.completion_time
+
+
+    
