@@ -153,8 +153,9 @@ class SemiconductorEnv:
         """
         # 获取可用的动作列表
         available_actions = self.get_available_actions()
-        print(available_actions)
-                
+        # 选择动作
+        selected_action = self.select_action(action, available_actions)
+        print(selected_action)
     def reset(self):
         """
         重置环境
@@ -309,6 +310,27 @@ class SemiconductorEnv:
             
             self.working = False
             self.current_operation = None
+
+    def select_action(self, action, available_actions):
+        """
+        选择一个动作
+        :param available_actions: 可用的动作集
+        :return: 选择的动作
+        """
+        # 选择action和avaliable_actions中欧几里得距离最近的动作
+        # 将action转换为numpy数组（确保是四维向量）
+        action_array = np.array(action)
+        
+        # 提取每个可用动作的后四个参数（设置时间、加工时间、剩余操作数量、剩余操作时间）
+        features_array = np.array([a[2:] for a in available_actions])
+        
+        # 计算欧几里得距离
+        distances = np.linalg.norm(features_array - action_array, axis=1)
+        
+        # 选择距离最小的动作
+        selected_index = np.argmin(distances)
+        return available_actions[selected_index]
+
 
 
 ##############################################################################
@@ -467,6 +489,6 @@ env = SemiconductorEnv(
     jobs=load_jobs(job_file, problem_file),
     operations=load_operations(operation_file, job_file)
 )
-env.step(0)
+env.step((0,2,1,3))
 
     
