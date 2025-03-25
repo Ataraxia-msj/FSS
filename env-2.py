@@ -50,26 +50,25 @@ class Machine:
         """
         return not self.working or current_time >= self.completion_time
 
-    def start_operation(self, operation, setup_time, processing_time, current_time, waiting_time):
+    def start_operation(self, operation, setup_time, processing_time, waiting_time):
         """
         开始一个操作
         :param operation: 当前操作
         :param setup_time: 设置时间
         :param processing_time: 加工时间
-        :param current_time: 当前时间戳
+        :param waiting_time: 等待时间
         """
         self.working = True
         self.current_operation = operation
-        self.completion_time = current_time + setup_time + processing_time + waiting_time
+        self.completion_time = self.completion_time + setup_time + processing_time + waiting_time
 
-    def finish_operation(self, current_time):
+    def finish_operation(self):
         """
         完成当前操作
         :param current_time: 当前时间戳
         """
-        if current_time >= self.completion_time:
-            self.working = False
-            self.current_operation = None
+        self.working = False
+        self.current_operation = None
 
 
 # 创建Job类
@@ -153,9 +152,28 @@ class SemiconductorEnv:
         """
         # 获取可用的动作列表
         available_actions = self.get_available_actions()
-        # 选择动作
-        selected_action = self.select_action(action, available_actions)
-        print(selected_action)
+        print("可用动作：", available_actions)
+        if not available_actions:
+            print("没有可用的动作")
+            return
+        else:
+            # 选择动作
+            selected_action = self.select_action(action, available_actions)
+            print("选择的动作：", selected_action)
+            # 执行动作
+            settime, waittime = self.execute_action(selected_action)
+            print("设置时间：", settime)
+            print("等待时间：", waittime)
+        reward = -settime - waittime
+        # 机器完成加工
+        for machine in self.machines:
+            if machine.working:
+                machine.finish_operation()
+        return reward
+
+        
+
+
     def reset(self):
         """
         重置环境
@@ -250,10 +268,9 @@ class SemiconductorEnv:
         if len(setting_parts) < 2:
             return 6  # 格式不符，使用默认值
         
-        # 提取当前设置中的作业类型和操作类型
-        setting_op_type = machine.setting
-        setting_job_type = setting_parts[0]
-        
+        setting_op_type = setting_parts[0]  # 第一部分是操作类型
+        setting_job_type = setting_parts[1]  # 第二部分是作业类型
+
         # 检查作业类型和操作类型是否相同
         is_job_type_same = setting_job_type == operation_job.job_name
         is_operation_type_same = setting_op_type == operation.operation_name
@@ -330,6 +347,74 @@ class SemiconductorEnv:
         # 选择距离最小的动作
         selected_index = np.argmin(distances)
         return available_actions[selected_index]
+    
+    def execute_action(self, action):
+        """
+        执行一个动作
+        :param action: 动作
+        """
+        # 解析动作
+        op_id, machine_id, setup_time, processing_time, remaining_ops_count, remaining_ops_time = action
+        
+        # 找到操作实例
+        operation = next((op for op in self.operation_instances if op.operation_id == op_id), None)
+        if not operation:
+            return
+        
+        # 找到机器
+        machine = next((m for m in self.machines if m.id == machine_id), None)
+        if not machine:
+            return
+        
+        # 更新操作的开始时间,开始时间为该机器当前完成时间
+        operation.start_time = machine.completion_time
+        
+        # 更新机器的设置时间
+        machine.setup_time = setup_time
+        
+        # 计算等待时间
+        wait_time = 0
+        if operation.predecessor:
+            # 找到前驱操作
+            predecessor = next((op for op in self.operation_instances if op.operation_id == operation.predecessor), None)
+            if predecessor and not predecessor.completed:
+                operation_start_with_setup = machine.completion_time + setup_time
+                if predecessor.completion_time > operation_start_with_setup:
+                    wait_time = predecessor.completion_time - operation_start_with_setup
+                else:
+                    wait_time = 0
+
+        # 开始操作
+        machine.start_operation(operation, setup_time, processing_time, wait_time)
+        
+        # 更新等待操作量
+        self.waiting_operations[op_id] -= 1
+        
+        # 更新操作的完成时间
+        operation.completion_time = machine.completion_time
+        
+        # 更新操作的完成状态
+        operation.completed = True
+
+        # 检查是否有后继操作，将其添加到等待队列
+        if operation.successor:
+            # 获取后继操作
+            successor_op = next((op for op in self.operation_instances if op.operation_id == operation.successor), None)
+            if successor_op:
+                # 检查所有前置操作是否完成
+                predecessors_completed = True
+                if successor_op.predecessor:
+                    # 确认前置操作已完成
+                    predecessor = next((op for op in self.operation_instances if op.operation_id == successor_op.predecessor), None)
+                    if predecessor and not predecessor.completed:
+                        predecessors_completed = False
+                
+                # 如果所有前置操作都已完成，则将后继操作添加到等待队列
+                if predecessors_completed:
+                    self.waiting_operations[operation.successor] = 1
+                    print(f"操作 {operation.successor} 已添加到等待队列")
+        
+        return setup_time,wait_time
 
 
 
@@ -489,6 +574,14 @@ env = SemiconductorEnv(
     jobs=load_jobs(job_file, problem_file),
     operations=load_operations(operation_file, job_file)
 )
-env.step((0,2,1,3))
+reward = env.step((0,2,1,3))
+print("奖励：", reward)
 
+reward = env.step((0,2,1,3))
+print("奖励：", reward)
+
+reward = env.step((6,2,1,3))
+print("奖励：", reward)
+
+reward = env.step((6,2,1,3))
     
