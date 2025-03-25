@@ -268,8 +268,8 @@ class SemiconductorEnv:
         if len(setting_parts) < 2:
             return 6  # 格式不符，使用默认值
         
-        setting_op_type = setting_parts[0]  # 第一部分是操作类型
-        setting_job_type = setting_parts[1]  # 第二部分是作业类型
+        setting_op_type = machine.setting  # 第一部分是操作类型
+        setting_job_type = setting_parts[0]  # 第二部分是作业类型
 
         # 检查作业类型和操作类型是否相同
         is_job_type_same = setting_job_type == operation_job.job_name
