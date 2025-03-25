@@ -584,4 +584,5 @@ reward = env.step((6,2,1,3))
 print("奖励：", reward)
 
 reward = env.step((6,2,1,3))
+print("奖励：", reward)
     
