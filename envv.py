@@ -4,17 +4,17 @@ import pandas as pd
 ##############################################################################
 # 变量
 
-# job_file = "dataset\\example_jobtypes.xlsx"
-# machine_file = "dataset\\machineTypes.xlsx"
-# operation_file = "dataset\\example_operationtypes.xlsx"
-# problem_file = "dataset\\example_problem.xlsx"
-# setup_file = "dataset\\example_setuptime.xlsx"
-
-job_file = "dataset\\jobTypes.xlsx"
+job_file = "dataset\\example_jobtypes.xlsx"
 machine_file = "dataset\\machineTypes.xlsx"
-operation_file = "dataset\\operationTypes.xlsx"
-problem_file = "dataset\\problem.xlsx"
-setup_file = "dataset\\setupTime.xlsx"
+operation_file = "dataset\\example_operationtypes.xlsx"
+problem_file = "dataset\\example_problem.xlsx"
+setup_file = "dataset\\example_setuptime.xlsx"
+
+# job_file = "dataset\\jobTypes.xlsx"
+# machine_file = "dataset\\machineTypes.xlsx"
+# operation_file = "dataset\\operationTypes.xlsx"
+# problem_file = "dataset\\problem.xlsx"
+# setup_file = "dataset\\setupTime.xlsx"
 
 # 等待执行的operation以及它的数量
 waiting_operations = {}
@@ -669,6 +669,16 @@ def get_setup_time(machine_type_id, is_job_type_same, is_operation_type_same):
         (2, False, True):  120,
         (2, False, False): 120,
     }
+    # setup_time_lookup = {
+    #     (1, True,  True):  0,
+    #     (1, True,  False): 3,
+    #     (1, False, True):  6,
+    #     (1, False, False): 6,
+    #     (2, True,  True):  0,
+    #     (2, True,  False): 3,
+    #     (2, False, True):  12,
+    #     (2, False, False): 12,
+    # }
     return setup_time_lookup[(machine_type_id, is_job_type_same, is_operation_type_same)]
 
 
