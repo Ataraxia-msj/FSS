@@ -5,10 +5,84 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from Env import SemiconductorEnv
+from envv import SemiconductorEnv, load_machines, load_jobs, load_operations
 import matplotlib.pyplot as plt
 
+##############################################################################
+# OU 噪声类，用于连续动作空间的探索
+class OUNoise:
+    """
+    Ornstein-Uhlenbeck噪声，用于连续动作的时间相关探索
+    """
+    def __init__(self, action_dim, mu=0.0, theta=0.15, sigma=0.2):
+        self.action_dim = action_dim
+        self.mu = mu
+        self.theta = theta
+        self.sigma = sigma
+        self.state = np.ones(self.action_dim) * self.mu
 
+    def reset(self):
+        self.state = np.ones(self.action_dim) * self.mu
+
+    def sample(self):
+        x = self.state
+        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(len(x))
+        self.state = x + dx
+        return self.state
+
+##############################################################################
+# 环境包装器
+class RLEnvWrapper:
+    def __init__(self):
+        # 文件路径
+        self.job_file = "dataset\\jobTypes.xlsx"
+        self.machine_file = "dataset\\machineTypes.xlsx"
+        self.operation_file = "dataset\\operationTypes.xlsx"
+        self.problem_file = "dataset\\problem.xlsx"
+        self.setup_file = "dataset\\setupTime.xlsx"
+
+        # 初始化环境
+        self.env = SemiconductorEnv(
+            machines=load_machines(self.machine_file, self.problem_file),
+            jobs=load_jobs(self.job_file, self.problem_file),
+            operations=load_operations(self.operation_file, self.job_file)
+        )
+        
+        # 设置状态和动作维度
+        self.num_operation_types = len(set(op.operation_type_id for op in self.env.operation_instances))
+        self.state_dim = self.num_operation_types * 3  # 三个状态向量
+        self.action_dim = 4  # setup_time, processing_time, left_operations, left_time
+    
+    def reset(self):
+        self.env.reset()
+        return self.env.state()
+    
+    def execute_action(self, action):
+        # 获取当前状态
+        current_state = self.env.state()
+        
+        # 执行动作并获取setup_time和wait_time
+        available_actions = self.env.get_available_actions()
+        if not available_actions:
+            # 如果没有可用动作，返回终止状态
+            return current_state, 0, True, {}
+        
+        # 选择最接近的可用动作
+        selected_action = self.env.select_action(action, available_actions)
+        setup_time, wait_time = self.env.execute_action(selected_action)
+        
+        # 获取新状态
+        next_state = self.env.state()
+        
+        # 计算奖励：负的时间消耗
+        reward = -(setup_time + wait_time)
+        
+        # 检查是否完成
+        done = self.env.is_done()
+        
+        return next_state, reward, done, {}
+
+##############################################################################
 # Actor 网络
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
@@ -26,6 +100,7 @@ class Actor(nn.Module):
         action = torch.tanh(self.fc3(x)) * max_action_tensor
         return action
 
+##############################################################################
 # Critic 网络
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
@@ -41,6 +116,7 @@ class Critic(nn.Module):
         q_value = self.fc3(x)
         return q_value
 
+##############################################################################
 # 经验回放缓冲区
 class ReplayBuffer:
     def __init__(self, capacity):
@@ -57,28 +133,47 @@ class ReplayBuffer:
     def size(self):
         return len(self.buffer)
 
+##############################################################################
 # DDPG 代理
 class DDPGAgent:
     def __init__(self, state_dim, action_dim, max_action):
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.max_action = max_action
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-5)  # 学习率可按情况微调
 
         self.critic = Critic(state_dim, action_dim).to(self.device)
         self.critic_target = Critic(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
 
         self.replay_buffer = ReplayBuffer(1000000)
-        self.batch_size = 64
-        self.gamma = 0.99
+        self.batch_size = 128
+        self.gamma = 0.98
         self.tau = 0.005
 
-    def select_action(self, state):
+        # 创建 OU 噪声用于动作探索
+        self.ou_noise = OUNoise(action_dim)
+
+    def select_action(self, state, explore=False):
+        """
+        默认不加噪声；如果需要在训练中进行探索，则设置 explore=True
+        """
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         action = self.actor(state).detach().cpu().data.numpy().flatten()
+
+        if explore:
+            # 加入 OU 噪声
+            ou_sample = self.ou_noise.sample()
+            action = np.clip(action + ou_sample, 0, self.max_action)
+        else:
+            action = np.clip(action, 0, self.max_action)
+
         return action
 
     def train(self):
@@ -92,33 +187,42 @@ class DDPGAgent:
         next_state = torch.FloatTensor(next_state).to(self.device)
         done = torch.FloatTensor(done).unsqueeze(1).to(self.device)
 
+        # 计算目标Q值
         target_action = self.actor_target(next_state)
         target_q = self.critic_target(next_state, target_action)
         target_q = reward + ((1 - done) * self.gamma * target_q).detach()
 
+        # 计算当前Q值并更新 Critic
         current_q = self.critic(state, action)
         critic_loss = F.mse_loss(current_q, target_q)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
 
+        # 更新 Actor，使其最大化 Q
         actor_loss = -self.critic(state, self.actor(state)).mean()
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
+        # 软更新目标网络
         for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
+    def reset_ou_noise(self):
+        """在每个 episode 开始时重置 OU 噪声"""
+        self.ou_noise.reset()
 
+##############################################################################
+# 主函数
 def main():
-    env = SemiconductorEnv()
-    state_dim = env.num_operation_types * 3  # 状态维度
-    action_dim = 4  # 动作维度：setup_time, processing_time, left_operations, left_time
-    # max_action = np.array([70, 300, 20, 5000])  # 动作范围
-    max_action = np.array([6,3, 1, 2])  # 动作范围
+    # 使用环境包装器
+    env_wrapper = RLEnvWrapper()
+    state_dim = env_wrapper.state_dim
+    action_dim = env_wrapper.action_dim
+    max_action = np.array([100, 100, 100, 100])  # 动作范围
 
     agent = DDPGAgent(state_dim, action_dim, max_action)
 
@@ -126,24 +230,31 @@ def main():
     max_steps = 500
 
     # 训练成功标准参数
+    success_window = 200
+    history_rewards = []
+    convergence_threshold = 100.0
+    training_success = False
 
-    success_window = 200  # 连续几个episode达标才算成功
-    history_rewards = []  # 记录历史奖励
-    convergence_threshold = 100.0  # 收敛阈值
-    training_success = False  # 训练是否成功的标志
+    # 训练过程中的 OU 噪声衰减参数
+    # 初始噪声 sigma 设置为 0.2，不断衰减
+    ou_sigma = 0.2
+    ou_sigma_decay = 0.995
+    min_ou_sigma = 0.05
 
     for episode in range(num_episodes):
-        state = env.reset()
+        state = env_wrapper.reset()
         episode_reward = 0
 
+        # 每轮开始时重置 OU 噪声
+        agent.reset_ou_noise()
+
+        # 随着训练进行，降低 OU 噪声幅度
+        agent.ou_noise.sigma = max(ou_sigma, min_ou_sigma)
+
         for step in range(max_steps):
-            action = agent.select_action(state)
-            noise = np.random.normal(0, 1, size=action_dim)
-            action = np.clip(action + noise, 0, max_action)
-            # print(f"Action: {action}")
-            # print(f"Action: {tuple(action)}")
-            # print(f"Action: {tuple(float(a) for a in action)}")
-            next_state, reward, done, _ = env.execute_action(tuple(float(a) for a in action))
+            # 选择带噪声动作
+            action = agent.select_action(state, explore=True)
+            next_state, reward, done, _ = env_wrapper.execute_action(action)
             agent.replay_buffer.add(state, action, reward, next_state, done)
 
             state = next_state
@@ -155,19 +266,23 @@ def main():
 
         print(f"Episode {episode + 1}, Reward: {episode_reward}")
         history_rewards.append(episode_reward)
-        # 判断是否达到训练成功标准
+        
+        # 衰减 OU 噪声的 sigma
+        ou_sigma = ou_sigma * ou_sigma_decay
+
+        # 判断收敛
         if episode >= success_window:
             recent_rewards = history_rewards[-success_window:]
             avg_recent_reward = np.mean(recent_rewards)
             
-            # 标准2: 奖励收敛判断
-            if episode >= 2*success_window:
-                prev_rewards = history_rewards[-2*success_window:-success_window]
+            if episode >= 2 * success_window:
+                prev_rewards = history_rewards[-2 * success_window : -success_window]
                 avg_prev_reward = np.mean(prev_rewards)
                 if abs(avg_recent_reward - avg_prev_reward) < convergence_threshold and avg_recent_reward > -50000:
                     training_success = True
-                    print(f"训练收敛! 奖励稳定在{avg_recent_reward:.2f}")
+                    print(f"训练收敛! 奖励稳定在 {avg_recent_reward:.2f}")
                     break
+                    
     # 绘制奖励曲线
     plt.figure(figsize=(12, 6))
     plt.plot(history_rewards)
@@ -175,20 +290,20 @@ def main():
     plt.xlabel('Episode')
     plt.ylabel('totalreward')
     plt.grid(True)
-    
-    # 添加移动平均线以更清晰地显示趋势
+
+    # 添加移动平均线
     window_size = 10
     if len(history_rewards) >= window_size:
-        moving_avg = np.convolve(history_rewards, np.ones(window_size)/window_size, mode='valid')
-        plt.plot(range(window_size-1, len(history_rewards)), moving_avg, 'r-', linewidth=2, label=f'{window_size}轮移动平均')
+        moving_avg = np.convolve(history_rewards, np.ones(window_size) / window_size, mode='valid')
+        plt.plot(range(window_size - 1, len(history_rewards)), moving_avg, 'r-', linewidth=2, label=f'{window_size}轮移动平均')
         plt.legend()
     
-    plt.savefig('rewardcurve.png')  # 保存图片
+    plt.savefig('rewardcurve.png')
     
     if training_success:
         print("训练成功！")
     else:
         print("达到最大训练轮数，但未满足收敛条件。")
-    
+
 if __name__ == "__main__":
     main()

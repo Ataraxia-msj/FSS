@@ -4,11 +4,17 @@ import pandas as pd
 ##############################################################################
 # 变量
 
-job_file = "dataset\\example_jobtypes.xlsx"
+# job_file = "dataset\\example_jobtypes.xlsx"
+# machine_file = "dataset\\machineTypes.xlsx"
+# operation_file = "dataset\\example_operationtypes.xlsx"
+# problem_file = "dataset\\example_problem.xlsx"
+# setup_file = "dataset\\example_setuptime.xlsx"
+
+job_file = "dataset\\jobTypes.xlsx"
 machine_file = "dataset\\machineTypes.xlsx"
-operation_file = "dataset\\example_operationtypes.xlsx"
-problem_file = "dataset\\example_problem.xlsx"
-setup_file = "dataset\\example_setuptime.xlsx"
+operation_file = "dataset\\operationTypes.xlsx"
+problem_file = "dataset\\problem.xlsx"
+setup_file = "dataset\\setupTime.xlsx"
 
 # 等待执行的operation以及它的数量
 waiting_operations = {}
@@ -193,12 +199,17 @@ class SemiconductorEnv:
 
         for machine in self.machines:
             machine.working = False
-            machine.current_operation =  None
+            machine.current_operation = None
             machine.completion_time = 0
-        for op in self.operations:
+        for op in self.operation_instances:  # 注意：应该重置operation_instances而不是operations
             op.completed = False
+            op.start_time = None
+            op.completion_time = None
         
-        waiting_operations = self.initialize_waiting_operations()
+        # 修复：正确地更新类属性
+        self.waiting_operations = self.initialize_waiting_operations()
+        
+        return self.state()  # 返回重置后的状态
     
 
     def initialize_waiting_operations(self):
@@ -480,6 +491,11 @@ class SemiconductorEnv:
         
         # 更新操作的完成状态
         operation.completed = True
+        
+        # 更新对应作业的已完成操作计数
+        job = next((j for j in self.jobs if j.job_id == operation.job_id), None)
+        if job and operation.operation_type_id in job.completed_operations:
+            job.completed_operations[operation.operation_type_id] += 1
 
         # 检查是否有后继操作，将其添加到等待队列
         if operation.successor:
@@ -497,7 +513,7 @@ class SemiconductorEnv:
                 # 如果所有前置操作都已完成，则将后继操作添加到等待队列
                 if predecessors_completed:
                     self.waiting_operations[operation.successor] = 1
-                    print(f"操作 {operation.successor} 已添加到等待队列")
+                    # print(f"操作 {operation.successor} 已添加到等待队列")
         # 更新时间
         self.timestamp = machine.completion_time
         # 更新机器状态
@@ -645,24 +661,24 @@ def get_setup_time(machine_type_id, is_job_type_same, is_operation_type_same):
     """
     setup_time_lookup = {
         (1, True,  True):  0,
-        (1, True,  False): 3,
-        (1, False, True):  6,
-        (1, False, False): 6,
+        (1, True,  False): 30,
+        (1, False, True):  60,
+        (1, False, False): 60,
         (2, True,  True):  0,
-        (2, True,  False): 6.2,
-        (2, False, True):  6.3,
-        (2, False, False): 6.4,
+        (2, True,  False): 30,
+        (2, False, True):  120,
+        (2, False, False): 120,
     }
     return setup_time_lookup[(machine_type_id, is_job_type_same, is_operation_type_same)]
 
 
 
 ##############################################################################
-env = SemiconductorEnv(
-    machines=load_machines(machine_file, problem_file),
-    jobs=load_jobs(job_file, problem_file),
-    operations=load_operations(operation_file, job_file)
-)
+# env = SemiconductorEnv(
+#     machines=load_machines(machine_file, problem_file),
+#     jobs=load_jobs(job_file, problem_file),
+#     operations=load_operations(operation_file, job_file)
+# )
 # reward = env.step((0,2,1,3))
 # print("奖励：", reward)
 
@@ -681,6 +697,8 @@ env = SemiconductorEnv(
 # reward = env.step((6.4,4,0,0))
 # print("奖励：", reward)
 
+# is_done = env.is_done()
+# print("是否完成：", is_done)
 
 ##############################################################################
 
