@@ -35,11 +35,11 @@ class OUNoise:
 class RLEnvWrapper:
     def __init__(self):
         # 文件路径
-        self.job_file = "FSS/dataset/jobTypes.xlsx"
-        self.machine_file = "FSS/dataset/machineTypes.xlsx"
-        self.operation_file = "FSS/dataset/operationTypes.xlsx"
-        self.problem_file = "FSS/dataset/problem.xlsx"
-        self.setup_file = "FSS/dataset/setupTime.xlsx"
+        self.job_file = "dataset\\jobTypes.xlsx"
+        self.machine_file = "dataset\\machineTypes.xlsx"
+        self.operation_file = "dataset\\operationTypes.xlsx"
+        self.problem_file = "dataset\\problem.xlsx"
+        self.setup_file = "dataset\\setupTime.xlsx"
 
         # 初始化环境
         self.env = SemiconductorEnv(
