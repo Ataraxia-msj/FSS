@@ -48,7 +48,7 @@ class Machine:
         :param current_time: 当前时间戳
         :return: 是否空闲
         """
-        return not self.working or current_time >= self.completion_time
+        return not self.working
 
     def start_operation(self, operation, setup_time, processing_time, waiting_time):
         """
@@ -60,13 +60,19 @@ class Machine:
         """
         self.working = True
         self.current_operation = operation
+        self.setup_time = setup_time
+        self.progress_time = processing_time
+        self.wait_time = waiting_time
         self.completion_time = self.completion_time + setup_time + processing_time + waiting_time
 
-    def finish_operation(self):
+    def finish_operation(self,operation=None):
         """
         完成当前操作
         :param current_time: 当前时间戳
         """
+        if operation:
+            self.setting = f"{operation.operation_name}"
+        
         self.working = False
         self.current_operation = None
 
@@ -150,6 +156,9 @@ class SemiconductorEnv:
         :param action: 动作
         :return: 下一个状态、奖励、是否完成
         """
+        # state
+        state = self.state()
+        print("当前状态：", state)
         # 获取可用的动作列表
         available_actions = self.get_available_actions()
         print("可用动作：", available_actions)
@@ -164,15 +173,14 @@ class SemiconductorEnv:
             settime, waittime = self.execute_action(selected_action)
             print("设置时间：", settime)
             print("等待时间：", waittime)
-        reward = -settime - waittime
-        # 机器完成加工
-        for machine in self.machines:
-            if machine.working:
-                machine.finish_operation()
-        return reward
-
         
+        # next_state
+        next_state = self.state()
+        print("Next_state：", next_state)
 
+        reward = -settime - waittime
+        
+        return state, reward
 
     def reset(self):
         """
@@ -210,6 +218,83 @@ class SemiconductorEnv:
         
         return waiting_ops
 
+    def state(self):
+        """获取当前状态"""
+        # 获取操作类型集合
+        operation_types = set(op.operation_type_id for op in self.operation_instances)
+        num_operation_types = len(operation_types)
+        operation_types_list = sorted(list(operation_types))
+        
+        # 向量1：等待操作数量
+        waiting_ops = np.zeros(num_operation_types)
+        for op_id, count in self.waiting_operations.items():
+            if count > 0:
+                op_instance = next((op for op in self.operation_instances if op.operation_id == op_id), None)
+                if op_instance:
+                    op_type_index = operation_types_list.index(op_instance.operation_type_id)
+                    waiting_ops[op_type_index] += count
+        
+        # 向量2：空闲机器数量
+        idle_machines = np.zeros(num_operation_types)
+        for machine in self.machines:
+            if not machine.working:  # 直接检查working状态
+                # 计算当前设置适合哪种操作类型
+                matched_op_type = None
+                
+                # 如果机器有设置，找到与当前设置匹配的操作类型
+                if machine.setting:
+                    for op_type_id in operation_types_list:
+                        # 检查哪个操作类型与当前机器设置匹配（考虑设置切换成本）
+                        for op in self.operation_instances:
+                            if op.operation_type_id == op_type_id and op.operation_name == machine.setting:
+                                matched_op_type = op_type_id
+                                break
+                        if matched_op_type:
+                            break
+                
+                # 如果没找到匹配的设置，再按机器类型计算
+                if not matched_op_type:
+                    for op_type_id in operation_types_list:
+                        if any(op.operation_type_id == op_type_id and op.machine_type == machine.type 
+                            for op in self.operation_instances):
+                            matched_op_type = op_type_id
+                            break
+                
+                # 如果找到了匹配的操作类型，更新空闲机器计数
+                if matched_op_type:
+                    op_type_index = operation_types_list.index(matched_op_type)
+                    idle_machines[op_type_index] += 1
+        
+        # 向量3：处理中操作数量
+        # 向量3：处理中操作数量 - 纯粹基于完成时间比较
+        in_process_ops = np.zeros(num_operation_types)
+
+        # 获取当前参考时间点
+        current_time = self.timestamp  # 当前时间戳
+
+        # 遍历所有操作实例，检查哪些是处理中状态
+        for op in self.operation_instances:
+            # 如果操作已经开始（有开始时间）但还未完成（完成时间大于当前时间）
+            if op.start_time is not None and op.completion_time > current_time:
+                op_type_index = operation_types_list.index(op.operation_type_id)
+                in_process_ops[op_type_index] += 1
+        
+        # 归一化
+        total_jobs = sum(job.demand for job in self.jobs)
+        total_machines = len(self.machines)
+        
+        state1 = waiting_ops / total_jobs if total_jobs > 0 else waiting_ops
+        state2 = idle_machines / total_machines if total_machines > 0 else idle_machines
+        state3 = in_process_ops / total_machines if total_machines > 0 else in_process_ops
+        
+        return np.concatenate([state1, state2, state3])
+
+    def is_done(self):
+        """
+        检查是否完成
+        """
+        return all(job.is_completed() for job in self.jobs)
+    
     def get_available_actions(self):
         """
         根据等待加工的操作，查找可用的动作集
@@ -229,7 +314,7 @@ class SemiconductorEnv:
             
             # 查找可以处理此操作类型的空闲机器
             for machine in self.machines:
-                if machine.type == op_instance.machine_type and machine.is_idle(self.timestamp):
+                if machine.type == op_instance.machine_type and not machine.working:
                     # 计算设置时间
                     setup_time = self.calculate_setup_time(machine, op_instance)
                     
@@ -377,7 +462,7 @@ class SemiconductorEnv:
         if operation.predecessor:
             # 找到前驱操作
             predecessor = next((op for op in self.operation_instances if op.operation_id == operation.predecessor), None)
-            if predecessor and not predecessor.completed:
+            if predecessor:
                 operation_start_with_setup = machine.completion_time + setup_time
                 if predecessor.completion_time > operation_start_with_setup:
                     wait_time = predecessor.completion_time - operation_start_with_setup
@@ -413,7 +498,11 @@ class SemiconductorEnv:
                 if predecessors_completed:
                     self.waiting_operations[operation.successor] = 1
                     print(f"操作 {operation.successor} 已添加到等待队列")
-        
+        # 更新时间
+        self.timestamp = machine.completion_time
+        # 更新机器状态
+        machine.finish_operation(operation)
+
         return setup_time,wait_time
 
 
@@ -574,15 +663,71 @@ env = SemiconductorEnv(
     jobs=load_jobs(job_file, problem_file),
     operations=load_operations(operation_file, job_file)
 )
-reward = env.step((0,2,1,3))
-print("奖励：", reward)
+# reward = env.step((0,2,1,3))
+# print("奖励：", reward)
 
-reward = env.step((0,2,1,3))
-print("奖励：", reward)
+# reward = env.step((0,2,1,3))
+# print("奖励：", reward)
 
-reward = env.step((6,2,1,3))
-print("奖励：", reward)
+# reward = env.step((6.4,3,0,0))
+# print("奖励：", reward)
 
-reward = env.step((6,2,1,3))
-print("奖励：", reward)
-    
+# reward = env.step((6,1,1,4))
+# print("奖励：", reward)
+
+# reward = env.step((0,3,0,0))
+# print("奖励：", reward)
+
+# reward = env.step((6.4,4,0,0))
+# print("奖励：", reward)
+
+
+##############################################################################
+
+# reward = env.step((0,2,1,3))
+# print("奖励：", reward)
+
+# reward = env.step((0,2,1,3))
+# print("奖励：", reward)
+
+# reward = env.step((6,1,1,4))
+# print("奖励：", reward)
+
+# reward = env.step((0,4,0,0))
+# print("奖励：", reward)
+
+##############################################################################
+
+# reward = env.step((6,1,1,4))
+# print("奖励：", reward)
+
+# reward = env.step((6,2,1,3))
+# print("奖励：", reward)
+
+# reward = env.step((6.4,3,0,0))
+# print("奖励：", reward)
+
+
+
+##############################################################################
+
+# reward = env.step((0,2,1,3))
+# print("奖励：", reward)
+
+# reward = env.step((0,2,1,3))
+# print("奖励：", reward)
+
+# reward = env.step((6,1,1,4))
+# print("奖励：", reward)
+
+# reward = env.step((6.4,3,0,0))
+# print("奖励：", reward)
+
+
+
+# reward = env.step((0,3,0,0))
+# print("奖励：", reward)
+
+# reward = env.step((6.4,4,0,0))
+# print("奖励：", reward)
+
