@@ -35,11 +35,11 @@ class OUNoise:
 class RLEnvWrapper:
     def __init__(self):
         # 文件路径
-        self.job_file = "dataset\\jobTypes.xlsx"
-        self.machine_file = "dataset\\machineTypes.xlsx"
-        self.operation_file = "dataset\\operationTypes.xlsx"
-        self.problem_file = "dataset\\problem.xlsx"
-        self.setup_file = "dataset\\setupTime.xlsx"
+        self.job_file = "FSS/dataset/jobTypes.xlsx"
+        self.machine_file = "FSS/dataset/machineTypes.xlsx"
+        self.operation_file = "FSS/dataset/operationTypes.xlsx"
+        self.problem_file = "FSS/dataset/problem.xlsx"
+        self.setup_file = "FSS/dataset/setupTime.xlsx"
 
         # 初始化环境
         self.env = SemiconductorEnv(
@@ -75,7 +75,8 @@ class RLEnvWrapper:
         next_state = self.env.state()
         
         # 计算奖励：负的时间消耗
-        reward = -(setup_time + wait_time)
+        reward_scale = 0.01
+        reward = -(setup_time + wait_time) * reward_scale
         
         # 检查是否完成
         done = self.env.is_done()
@@ -145,12 +146,12 @@ class DDPGAgent:
         self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-5)  # 学习率可按情况微调
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)  # 学习率可按情况微调
 
         self.critic = Critic(state_dim, action_dim).to(self.device)
         self.critic_target = Critic(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
 
         self.replay_buffer = ReplayBuffer(1000000)
         self.batch_size = 128
@@ -197,12 +198,14 @@ class DDPGAgent:
         critic_loss = F.mse_loss(current_q, target_q)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
         self.critic_optimizer.step()
 
         # 更新 Actor，使其最大化 Q
         actor_loss = -self.critic(state, self.actor(state)).mean()
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
 
         # 软更新目标网络
@@ -222,12 +225,12 @@ def main():
     env_wrapper = RLEnvWrapper()
     state_dim = env_wrapper.state_dim
     action_dim = env_wrapper.action_dim
-    max_action = np.array([100, 100, 100, 100])  # 动作范围
+    max_action = np.array([1000, 1000, 1000, 1000])  # 动作范围
 
     agent = DDPGAgent(state_dim, action_dim, max_action)
 
-    num_episodes = 1000
-    max_steps = 500
+    num_episodes = 2000
+    max_steps = 10000
 
     # 训练成功标准参数
     success_window = 200
@@ -239,7 +242,7 @@ def main():
     # 初始噪声 sigma 设置为 0.2，不断衰减
     ou_sigma = 0.2
     ou_sigma_decay = 0.995
-    min_ou_sigma = 0.05
+    min_ou_sigma = 0.1
 
     for episode in range(num_episodes):
         state = env_wrapper.reset()
