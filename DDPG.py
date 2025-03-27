@@ -38,7 +38,7 @@ class RLEnvWrapper:
         self.job_file = "dataset\\jobTypes.xlsx"
         self.machine_file = "dataset\\machineTypes.xlsx"
         self.operation_file = "dataset\\operationTypes.xlsx"
-        self.problem_file = "dataset\\problem.xlsx"
+        self.problem_file = "dataset\\problem_one.xlsx"
         self.setup_file = "dataset\\setupTime.xlsx"
 
         # 初始化环境
@@ -75,28 +75,41 @@ class RLEnvWrapper:
         next_state = self.env.state()
         
         # 计算奖励：负的时间消耗
-        reward_scale = 0.01
-        reward = -(setup_time + wait_time) * reward_scale
+        reward = -(setup_time + wait_time)
         
         # 检查是否完成
         done = self.env.is_done()
         
         return next_state, reward, done, {}
 
+    def get_makespan(self):
+        """
+        获取当前所有机器的最大完成时间（makespan）
+        """
+        if hasattr(self.env, 'get_makespan'):
+            return self.env.get_makespan()
+        elif hasattr(self.env, 'machines'):
+            # 如果环境中有machines属性，计算所有机器的最大完成时间
+            return max([machine.completion_time for machine in self.env.machines]) if self.env.machines else 0
+        else:
+            # 如果无法直接获取，返回一个近似值
+            return -self.env.state()[0] if hasattr(self.env, 'state') else 0
+
 ##############################################################################
 # Actor 网络
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
         super(Actor, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, action_dim)
+        self.fc1 = nn.Linear(state_dim, 400)  # 增加网络宽度
+        self.ln1 = nn.LayerNorm(400)  # 添加层归一化
+        self.fc2 = nn.Linear(400, 300)
+        self.ln2 = nn.LayerNorm(300)
+        self.fc3 = nn.Linear(300, action_dim)
         self.max_action = max_action
 
     def forward(self, state):
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        # 将max_action转换为张量并移至与state相同的设备
+        x = F.relu(self.ln1(self.fc1(state)))
+        x = F.relu(self.ln2(self.fc2(x)))
         max_action_tensor = torch.tensor(self.max_action, dtype=torch.float32, device=state.device)
         action = torch.tanh(self.fc3(x)) * max_action_tensor
         return action
@@ -106,14 +119,16 @@ class Actor(nn.Module):
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_dim + action_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
+        self.fc1 = nn.Linear(state_dim + action_dim, 400)
+        self.ln1 = nn.LayerNorm(400)
+        self.fc2 = nn.Linear(400, 300)
+        self.ln2 = nn.LayerNorm(300)
+        self.fc3 = nn.Linear(300, 1)
 
     def forward(self, state, action):
         x = torch.cat([state, action], 1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = F.relu(self.ln1(self.fc1(x)))
+        x = F.relu(self.ln2(self.fc2(x)))
         q_value = self.fc3(x)
         return q_value
 
@@ -161,7 +176,7 @@ class DDPGAgent:
         # 创建 OU 噪声用于动作探索
         self.ou_noise = OUNoise(action_dim)
 
-    def select_action(self, state, explore=False):
+    def select_action(self, state, explore=True):
         """
         默认不加噪声；如果需要在训练中进行探索，则设置 explore=True
         """
@@ -235,14 +250,15 @@ def main():
     # 训练成功标准参数
     success_window = 200
     history_rewards = []
+    history_makespans = []  # 添加记录makespan的列表
     convergence_threshold = 100.0
     training_success = False
 
     # 训练过程中的 OU 噪声衰减参数
     # 初始噪声 sigma 设置为 0.2，不断衰减
-    ou_sigma = 0.2
-    ou_sigma_decay = 0.995
-    min_ou_sigma = 0.1
+    ou_sigma = 10
+    ou_sigma_decay = 0.999
+    min_ou_sigma = 2
 
     for episode in range(num_episodes):
         state = env_wrapper.reset()
@@ -266,9 +282,12 @@ def main():
 
             if done:
                 break
+        current_makespan = env_wrapper.get_makespan()
 
-        print(f"Episode {episode + 1}, Reward: {episode_reward}")
+        # print(f"Episode {episode + 1}, Reward: {episode_reward}")
+        print(f"Episode {episode + 1}, Reward: {episode_reward}, Makespan: {current_makespan/60:.2f}h")
         history_rewards.append(episode_reward)
+        history_makespans.append(current_makespan)
         
         # 衰减 OU 噪声的 sigma
         ou_sigma = ou_sigma * ou_sigma_decay
