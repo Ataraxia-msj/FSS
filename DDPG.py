@@ -100,18 +100,23 @@ class RLEnvWrapper:
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
         super(Actor, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 400)  # 增加网络宽度
-        self.ln1 = nn.LayerNorm(400)  # 添加层归一化
-        self.fc2 = nn.Linear(400, 300)
-        self.ln2 = nn.LayerNorm(300)
-        self.fc3 = nn.Linear(300, action_dim)
+        # 修改为三个隐藏层，每层64个节点
+        self.fc1 = nn.Linear(state_dim, 64)
+        self.ln1 = nn.LayerNorm(64)
+        self.fc2 = nn.Linear(64, 64)
+        self.ln2 = nn.LayerNorm(64)
+        self.fc3 = nn.Linear(64, 64)
+        self.ln3 = nn.LayerNorm(64)
+        self.fc4 = nn.Linear(64, action_dim)
         self.max_action = max_action
 
     def forward(self, state):
-        x = F.relu(self.ln1(self.fc1(state)))
-        x = F.relu(self.ln2(self.fc2(x)))
+        # 使用Leaky ReLU激活函数
+        x = F.leaky_relu(self.ln1(self.fc1(state)))
+        x = F.leaky_relu(self.ln2(self.fc2(x)))
+        x = F.leaky_relu(self.ln3(self.fc3(x)))
         max_action_tensor = torch.tensor(self.max_action, dtype=torch.float32, device=state.device)
-        action = torch.tanh(self.fc3(x)) * max_action_tensor
+        action = torch.tanh(self.fc4(x)) * max_action_tensor
         return action
 
 ##############################################################################
@@ -119,17 +124,22 @@ class Actor(nn.Module):
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_dim + action_dim, 400)
-        self.ln1 = nn.LayerNorm(400)
-        self.fc2 = nn.Linear(400, 300)
-        self.ln2 = nn.LayerNorm(300)
-        self.fc3 = nn.Linear(300, 1)
+        # 修改为三个隐藏层，每层64个节点
+        self.fc1 = nn.Linear(state_dim + action_dim, 64)
+        self.ln1 = nn.LayerNorm(64)
+        self.fc2 = nn.Linear(64, 64)
+        self.ln2 = nn.LayerNorm(64)
+        self.fc3 = nn.Linear(64, 64)
+        self.ln3 = nn.LayerNorm(64)
+        self.fc4 = nn.Linear(64, 1)
 
     def forward(self, state, action):
         x = torch.cat([state, action], 1)
-        x = F.relu(self.ln1(self.fc1(x)))
-        x = F.relu(self.ln2(self.fc2(x)))
-        q_value = self.fc3(x)
+        # 使用Leaky ReLU激活函数
+        x = F.leaky_relu(self.ln1(self.fc1(x)))
+        x = F.leaky_relu(self.ln2(self.fc2(x)))
+        x = F.leaky_relu(self.ln3(self.fc3(x)))
+        q_value = self.fc4(x)
         return q_value
 
 ##############################################################################
@@ -161,20 +171,31 @@ class DDPGAgent:
         self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)  # 学习率可按情况微调
+        # 修改Actor学习率为2×10^-4
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=2e-4)
 
         self.critic = Critic(state_dim, action_dim).to(self.device)
         self.critic_target = Critic(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
+        # 修改Critic学习率为2×10^-5
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=2e-5)
 
-        self.replay_buffer = ReplayBuffer(1000000)
-        self.batch_size = 128
-        self.gamma = 0.98
-        self.tau = 0.005
+        # 修改经验回放缓冲区大小为10^5
+        self.replay_buffer = ReplayBuffer(100000)
+        # 修改批次大小为64
+        self.batch_size = 64
+        # 修改折扣因子为0.9
+        self.gamma = 0.9
+        # 修改软更新系数为10^-3
+        self.tau = 0.001
 
         # 创建 OU 噪声用于动作探索
         self.ou_noise = OUNoise(action_dim)
+        
+        # 用于记录已储存的转换数量
+        self.transitions_stored = 0
+        # 设置开始训练所需的最小转换数量
+        self.min_transitions_before_training = 10000
 
     def select_action(self, state, explore=True):
         """
@@ -240,7 +261,7 @@ def main():
     env_wrapper = RLEnvWrapper()
     state_dim = env_wrapper.state_dim
     action_dim = env_wrapper.action_dim
-    max_action = np.array([1000, 1000, 1000, 1000])  # 动作范围
+    max_action = np.array([200, 300, 100, 1000])  # 动作范围
 
     agent = DDPGAgent(state_dim, action_dim, max_action)
 
@@ -255,10 +276,28 @@ def main():
     training_success = False
 
     # 训练过程中的 OU 噪声衰减参数
-    # 初始噪声 sigma 设置为 0.2，不断衰减
     ou_sigma = 10
     ou_sigma_decay = 0.999
     min_ou_sigma = 2
+    
+    # 首先收集足够的转换数据
+    print(f"首先收集{agent.min_transitions_before_training}条转换数据...")
+    while agent.replay_buffer.size() < agent.min_transitions_before_training:
+        state = env_wrapper.reset()
+        for step in range(max_steps):
+            # 纯随机或探索性强的动作收集数据
+            action = agent.select_action(state, explore=True)
+            next_state, reward, done, _ = env_wrapper.execute_action(action)
+            agent.replay_buffer.add(state, action, reward, next_state, done)
+            
+            state = next_state
+            if done or agent.replay_buffer.size() >= agent.min_transitions_before_training:
+                break
+        
+        if agent.replay_buffer.size() % 1000 == 0:
+            print(f"已收集 {agent.replay_buffer.size()} 条转换数据")
+    
+    print(f"数据收集完成，开始训练...")
 
     for episode in range(num_episodes):
         state = env_wrapper.reset()
@@ -284,7 +323,6 @@ def main():
                 break
         current_makespan = env_wrapper.get_makespan()
 
-        # print(f"Episode {episode + 1}, Reward: {episode_reward}")
         print(f"Episode {episode + 1}, Reward: {episode_reward}, Makespan: {current_makespan/60:.2f}h")
         history_rewards.append(episode_reward)
         history_makespans.append(current_makespan)
